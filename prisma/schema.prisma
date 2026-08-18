@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  VENDOR
+  RIDER
+  ADMIN
+}
+
+enum ApplicationType {
+  VENDOR
+  RIDER
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PREPARING
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum EarningStatus {
+  PENDING    // order not yet completed / dispute window open
+  AVAILABLE  // ready to be paid out
+  PAID       // transfer sent
+  HELD       // disputed, frozen
+}
+
+enum PayoutType {
+  BATCH
+  MANUAL_EMERGENCY
+}
+
+enum PayoutBatchType {
+  VENDOR_DAILY
+  RIDER_WEEKLY
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  phone        String   @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  vendor Vendor?
+  rider  Rider?
+  orders Order[] @relation("CustomerOrders")
+}
+
+model Application {
+  id            String            @id @default(cuid())
+  type          ApplicationType
+  status        ApplicationStatus @default(PENDING)
+
+  // shared
+  phone         String
+  ghanaCard     String
+  payoutMethod  String?
+  payoutNumber  String
+
+  // vendor-specific
+  businessName  String?
+  category      String?
+  ownerName     String?
+  address       String?
+
+  // rider-specific
+  fullName      String?
+  vehicleType   String?
+  vehicleReg    String?
+
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  createdAt     DateTime          @default(now())
+}
+
+model Vendor {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  businessName   String
+  category       String
+  address        String
+  ghanaCard      String
+  payoutMethod   String
+  payoutNumber   String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  menuItems MenuItem[]
+  orders    Order[]
+  earnings  VendorEarning[]
+}
+
+model Rider {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  fullName     String
+  phone        String
+  ghanaCard    String
+  vehicleType  String
+  vehicleReg   String?
+  payoutNumber String
+  isOnline     Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  orders   Order[]
+  earnings RiderEarning[]
+  manualPayouts ManualPayout[]
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  name        String
+  price       Float
+  category    String?
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  orderItems OrderItem[]
+}
+
+model Order {
+  id          String        @id @default(cuid())
+  customerId  String
+  customer    User          @relation("CustomerOrders", fields: [customerId], references: [id])
+  vendorId    String
+  vendor      Vendor        @relation(fields: [vendorId], references: [id])
+  riderId     String?
+  rider       Rider?        @relation(fields: [riderId], references: [id])
+
+  status        OrderStatus   @default(PLACED)
+  paymentStatus PaymentStatus @default(PENDING)
+
+  subtotal      Float
+  deliveryFee   Float
+  serviceFee    Float
+  tip           Float         @default(0)
+  total         Float
+
+  // commission rates snapshotted at order time so later rule changes don't affect past orders
+  vendorCommissionRate Float
+  riderCommissionRate  Float
+
+  paystackReference String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items        OrderItem[]
+  vendorEarning VendorEarning?
+  riderEarning  RiderEarning?
+  disputes     Dispute[]
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id])
+  menuItemId String?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id])
+  name       String
+  price      Float
+  quantity   Int
+}
+
+model VendorEarning {
+  id               String        @id @default(cuid())
+  vendorId         String
+  vendor           Vendor        @relation(fields: [vendorId], references: [id])
+  orderId          String        @unique
+  order            Order         @relation(fields: [orderId], references: [id])
+  grossAmount      Float
+  commissionAmount Float
+  netAmount        Float
+  status           EarningStatus @default(PENDING)
+  availableAt      DateTime?
+  payoutBatchId    String?
+  payoutBatch      PayoutBatch?  @relation(fields: [payoutBatchId], references: [id])
+  createdAt        DateTime      @default(now())
+}
+
+model RiderEarning {
+  id               String        @id @default(cuid())
+  riderId          String
+  rider            Rider         @relation(fields: [riderId], references: [id])
+  orderId          String        @unique
+  order            Order         @relation(fields: [orderId], references: [id])
+  deliveryFee      Float
+  tip              Float
+  commissionAmount Float
+  netAmount        Float
+  status           EarningStatus @default(PENDING)
+  payoutType       PayoutType    @default(BATCH)
+  availableAt      DateTime?
+  payoutBatchId    String?
+  payoutBatch      PayoutBatch?  @relation(fields: [payoutBatchId], references: [id])
+  createdAt        DateTime      @default(now())
+}
+
+model ManualPayout {
+  id          String   @id @default(cuid())
+  riderId     String
+  rider       Rider    @relation(fields: [riderId], references: [id])
+  adminId     String
+  amount      Float
+  reason      String?
+  transferRef String?
+  createdAt   DateTime @default(now())
+}
+
+model PayoutBatch {
+  id           String          @id @default(cuid())
+  type         PayoutBatchType
+  runAt        DateTime        @default(now())
+  totalAmount  Float
+  recipientCount Int
+  status       String          @default("completed")
+
+  vendorEarnings VendorEarning[]
+  riderEarnings  RiderEarning[]
+}
+
+model CommissionRule {
+  id                  String   @id @default(cuid())
+  vendorCommissionRate Float   @default(0.20)
+  riderCommissionRate  Float   @default(0.15)
+  serviceFeeType       String  @default("flat") // "flat" | "percentage"
+  serviceFeeValue      Float   @default(5)
+  updatedAt            DateTime @updatedAt
+}
+
+model Dispute {
+  id             String        @id @default(cuid())
+  orderId        String
+  order          Order         @relation(fields: [orderId], references: [id])
+  reason         String
+  status         DisputeStatus @default(OPEN)
+  resolutionNote String?
+  createdAt      DateTime      @default(now())
+  resolvedAt     DateTime?
+}
