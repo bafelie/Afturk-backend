@@ -2,7 +2,14 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const prisma = require("../config/prisma");
 
-// Public endpoint — this is what the Vendor sign-up and Rider sign-up forms submit to.
+const LIST_SELECT = {
+  id: true, type: true, status: true, phone: true, ghanaCard: true,
+  payoutMethod: true, payoutNumber: true, businessName: true, category: true,
+  ownerName: true, address: true, fullName: true, vehicleType: true,
+  vehicleReg: true, vehicleSource: true, isStudent: true,
+  reviewedBy: true, reviewedAt: true, createdAt: true,
+};
+
 async function submitApplication(req, res) {
   const { type } = req.body;
   if (!["VENDOR", "RIDER"].includes(type)) {
@@ -11,8 +18,9 @@ async function submitApplication(req, res) {
 
   const {
     phone, ghanaCard, payoutMethod, payoutNumber,
-    businessName, category, ownerName, address, // vendor fields
-    fullName, vehicleType, vehicleReg,           // rider fields
+    businessName, category, ownerName, address,
+    fullName, vehicleType, vehicleReg, vehicleSource,
+    isStudent, selfiePhoto, ghanaCardPhoto, studentIdPhoto,
   } = req.body;
 
   if (!phone || !ghanaCard || !payoutNumber) {
@@ -23,14 +31,15 @@ async function submitApplication(req, res) {
     data: {
       type, phone, ghanaCard, payoutMethod, payoutNumber,
       businessName, category, ownerName, address,
-      fullName, vehicleType, vehicleReg,
+      fullName, vehicleType, vehicleReg, vehicleSource,
+      isStudent: !!isStudent, selfiePhoto, ghanaCardPhoto,
+      studentIdPhoto: isStudent ? studentIdPhoto : null,
     },
   });
 
   res.status(201).json({ reference: application.id, status: application.status });
 }
 
-// Admin-only — the approval queue in the dashboard reads from here.
 async function listApplications(req, res) {
   const { status = "PENDING", type } = req.query;
   const applications = await prisma.application.findMany({
@@ -38,13 +47,19 @@ async function listApplications(req, res) {
       status: status.toUpperCase(),
       ...(type ? { type: type.toUpperCase() } : {}),
     },
+    select: LIST_SELECT,
     orderBy: { createdAt: "desc" },
   });
   res.json(applications);
 }
 
-// Approves an application: creates the User + Vendor/Rider record and
-// returns a one-time temporary password (in production, SMS this instead).
+async function getApplication(req, res) {
+  const { id } = req.params;
+  const application = await prisma.application.findUnique({ where: { id } });
+  if (!application) return res.status(404).json({ error: "Application not found" });
+  res.json(application);
+}
+
 async function approveApplication(req, res) {
   const { id } = req.params;
   const application = await prisma.application.findUnique({ where: { id } });
@@ -66,7 +81,7 @@ async function approveApplication(req, res) {
       data: {
         phone: application.phone,
         passwordHash,
-        role: application.type, // "VENDOR" or "RIDER"
+        role: application.type,
       },
     });
 
@@ -91,6 +106,7 @@ async function approveApplication(req, res) {
           ghanaCard: application.ghanaCard,
           vehicleType: application.vehicleType,
           vehicleReg: application.vehicleReg,
+          vehicleSource: application.vehicleSource,
           payoutNumber: application.payoutNumber,
         },
       });
@@ -108,7 +124,7 @@ async function approveApplication(req, res) {
     message: "Application approved",
     userId: result.id,
     phone: result.phone,
-    tempPassword, // send via SMS in production instead of returning it in the response
+    tempPassword,
   });
 }
 
@@ -125,4 +141,6 @@ async function declineApplication(req, res) {
   res.json({ message: "Application declined" });
 }
 
-module.exports = { submitApplication, listApplications, approveApplication, declineApplication };
+module.exports = {
+  submitApplication, listApplications, getApplication, approveApplication, declineApplication,
+};

@@ -43,10 +43,10 @@ enum PaymentStatus {
 }
 
 enum EarningStatus {
-  PENDING    // order not yet completed / dispute window open
-  AVAILABLE  // ready to be paid out
-  PAID       // transfer sent
-  HELD       // disputed, frozen
+  PENDING
+  AVAILABLE
+  PAID
+  HELD
 }
 
 enum PayoutType {
@@ -83,22 +83,25 @@ model Application {
   type          ApplicationType
   status        ApplicationStatus @default(PENDING)
 
-  // shared
   phone         String
   ghanaCard     String
   payoutMethod  String?
   payoutNumber  String
 
-  // vendor-specific
   businessName  String?
   category      String?
   ownerName     String?
   address       String?
 
-  // rider-specific
   fullName      String?
   vehicleType   String?
   vehicleReg    String?
+  vehicleSource String?
+
+  isStudent      Boolean  @default(false)
+  selfiePhoto    String?
+  ghanaCardPhoto String?
+  studentIdPhoto String?
 
   reviewedBy    String?
   reviewedAt    DateTime?
@@ -132,6 +135,7 @@ model Rider {
   ghanaCard    String
   vehicleType  String
   vehicleReg   String?
+  vehicleSource String?
   payoutNumber String
   isOnline     Boolean  @default(false)
   isActive     Boolean  @default(true)
@@ -173,7 +177,6 @@ model Order {
   tip           Float         @default(0)
   total         Float
 
-  // commission rates snapshotted at order time so later rule changes don't affect past orders
   vendorCommissionRate Float
   riderCommissionRate  Float
 
@@ -260,7 +263,7 @@ model CommissionRule {
   id                  String   @id @default(cuid())
   vendorCommissionRate Float   @default(0.20)
   riderCommissionRate  Float   @default(0.15)
-  serviceFeeType       String  @default("flat") // "flat" | "percentage"
+  serviceFeeType       String  @default("flat")
   serviceFeeValue      Float   @default(5)
   updatedAt            DateTime @updatedAt
 }
